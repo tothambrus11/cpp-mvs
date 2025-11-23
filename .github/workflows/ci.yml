@@ -33,13 +33,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Build Tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y ninja-build cmake
+    # - name: Install Build Tools
+    #   run: |
+    #     sudo apt-get update
+    #     sudo apt-get install -y ninja-build cmake
 
-    # - name: Install Compiler
-    #   run: ${{ matrix.compiler.install_script }}
+    - name: Install Compiler
+      run: ${{ matrix.compiler.install_script }}
 
     - name: Configure CMake
       env:

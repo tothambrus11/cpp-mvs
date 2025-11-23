@@ -270,6 +270,41 @@ TEST_SUITE("FlexibleArrayChecked Edge Cases") {
         
         CHECK(fa.capacity() == 0);
         CHECK(fa.header() != nullptr);
+        CHECK(fa.is_valid());
+    }
+    
+    TEST_CASE("Create empty checked array") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa = FA::create_empty();
+        
+        CHECK(!fa.is_valid());
+        
+        // Move constructor preserves invalid state
+        auto fa2 = std::move(fa);
+        CHECK(!fa.is_valid());
+        CHECK(!fa2.is_valid());
+    }
+    
+    TEST_CASE("is_valid after move") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        
+        CHECK(fa1.is_valid());
+        
+        auto fa2 = std::move(fa1);
+        CHECK(!fa1.is_valid());
+        CHECK(fa2.is_valid());
+    }
+    
+    TEST_CASE("is_valid after extract_storage") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa = FA::with_header(3, StandardHeader{3});
+        
+        CHECK(fa.is_valid());
+        
+        auto unchecked = fa.extract_storage();
+        CHECK(!fa.is_valid());
+        CHECK(unchecked.is_valid());
     }
     
     TEST_CASE("Extract storage functionality") {
@@ -393,6 +428,45 @@ TEST_SUITE("FlexibleArrayUnchecked Edge Cases") {
         
         CHECK(fa.header() != nullptr);
         CHECK(fa.header()->trailing_element_count() == 0);
+        CHECK(fa.is_valid());
+    }
+    
+    TEST_CASE("Create empty unchecked array") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa = FA::create_empty();
+        
+        CHECK(!fa.is_valid());
+        
+        // Move constructor preserves invalid state
+        auto fa2 = std::move(fa);
+        CHECK(!fa.is_valid());
+        CHECK(!fa2.is_valid());
+    }
+    
+    TEST_CASE("is_valid for unchecked after move") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        
+        CHECK(fa1.is_valid());
+        
+        auto fa2 = std::move(fa1);
+        CHECK(!fa1.is_valid());
+        CHECK(fa2.is_valid());
+    }
+    
+    TEST_CASE("is_valid after leak_storage") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa = FA::with_header(3, StandardHeader{3});
+        
+        CHECK(fa.is_valid());
+        
+        auto* raw = fa.leak_storage();
+        CHECK(!fa.is_valid());
+        CHECK(raw != nullptr);
+        
+        // Manually cleanup
+        std::destroy_at(reinterpret_cast<StandardHeader*>(raw));
+        Detail::aligned_free(raw);
     }
     
     TEST_CASE("Swap unchecked arrays") {
@@ -504,6 +578,146 @@ TEST_SUITE("Mixed Checked and Unchecked Usage") {
         // Verify that FlexibleArrayChecked has the same size as FlexibleArrayUnchecked
         // since it should only contain the unchecked storage member
         CHECK(sizeof(FAChecked) == sizeof(FAUnchecked));
+    }
+}
+
+TEST_SUITE("is_valid() and create_empty() Comprehensive Tests") {
+    TEST_CASE("Empty array move assignment") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        auto fa2 = FA::create_empty();
+        
+        CHECK(fa1.is_valid());
+        CHECK(!fa2.is_valid());
+        
+        fa1 = std::move(fa2);
+        CHECK(!fa1.is_valid());
+    }
+    
+    TEST_CASE("Move from empty to non-empty") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa1 = FA::create_empty();
+        auto fa2 = FA::with_header(3, StandardHeader{3});
+        
+        CHECK(!fa1.is_valid());
+        CHECK(fa2.is_valid());
+        
+        fa1 = std::move(fa2);
+        CHECK(fa1.is_valid());
+        CHECK(!fa2.is_valid());
+        CHECK(fa1.capacity() == 3);
+    }
+    
+    TEST_CASE("Swap with empty array") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        auto fa2 = FA::create_empty();
+        
+        CHECK(fa1.is_valid());
+        CHECK(!fa2.is_valid());
+        
+        swap(fa1, fa2);
+        
+        CHECK(!fa1.is_valid());
+        CHECK(fa2.is_valid());
+        CHECK(fa2.capacity() == 3);
+    }
+    
+    TEST_CASE("is_valid throughout lifecycle") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        
+        // Create
+        auto fa = FA::with_header(5, StandardHeader{5});
+        CHECK(fa.is_valid());
+        
+        // Use
+        std::construct_at(fa.element_address(0), 42);
+        CHECK(fa.is_valid());
+        CHECK(*fa.element_address(0) == 42);
+        
+        // Move
+        auto fa2 = std::move(fa);
+        CHECK(!fa.is_valid());
+        CHECK(fa2.is_valid());
+        CHECK(*fa2.element_address(0) == 42);
+        
+        // Extract
+        auto unchecked = fa2.extract_storage();
+        CHECK(!fa2.is_valid());
+        CHECK(unchecked.is_valid());
+        CHECK(*unchecked.element_address(0) == 42);
+    }
+    
+    TEST_CASE("Unchecked empty array move assignment") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        auto fa2 = FA::create_empty();
+        
+        CHECK(fa1.is_valid());
+        CHECK(!fa2.is_valid());
+        
+        fa1 = std::move(fa2);
+        CHECK(!fa1.is_valid());
+    }
+    
+    TEST_CASE("Unchecked swap with empty array") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        auto fa2 = FA::create_empty();
+        
+        CHECK(fa1.is_valid());
+        CHECK(!fa2.is_valid());
+        
+        swap(fa1, fa2);
+        
+        CHECK(!fa1.is_valid());
+        CHECK(fa2.is_valid());
+        CHECK(fa2.header()->trailing_element_count() == 3);
+    }
+    
+    TEST_CASE("Multiple create_empty calls") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        
+        auto fa1 = FA::create_empty();
+        auto fa2 = FA::create_empty();
+        auto fa3 = FA::create_empty();
+        
+        CHECK(!fa1.is_valid());
+        CHECK(!fa2.is_valid());
+        CHECK(!fa3.is_valid());
+        
+        // They should all be independently invalid
+        auto fa4 = std::move(fa1);
+        CHECK(!fa4.is_valid());
+    }
+    
+    TEST_CASE("Self-move of empty array") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa = FA::create_empty();
+        
+        CHECK(!fa.is_valid());
+        
+        fa = std::move(fa);
+        CHECK(!fa.is_valid());
+    }
+    
+    TEST_CASE("Validity checks with different header types") {
+        struct ComplexHeader {
+            Int cap;
+            int value;
+            ComplexHeader(Int c, int v) : cap(c), value(v) {}
+            [[nodiscard]] Int trailing_element_count() const { return cap; }
+        };
+        
+        using FA = FlexibleArrayChecked<ComplexHeader, double>;
+        
+        auto empty = FA::create_empty();
+        CHECK(!empty.is_valid());
+        
+        auto valid = FA::with_header(5, ComplexHeader{5, 999});
+        CHECK(valid.is_valid());
+        CHECK(valid.capacity() == 5);
+        CHECK(valid.header()->value == 999);
     }
 }
 

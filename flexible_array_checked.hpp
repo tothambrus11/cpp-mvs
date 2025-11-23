@@ -35,6 +35,15 @@ public:
                                           [&](Header* place) { std::construct_at(place, std::move(header)); });
     }
 
+    /// Creates an empty FlexibleArrayChecked with no allocated storage.
+    [[nodiscard]] static constexpr auto create_empty() noexcept -> FlexibleArrayChecked 
+    { 
+        return FlexibleArrayChecked{FlexibleArrayUnchecked<Header, Element>::create_empty()}; 
+    }
+
+    /// Whether the FlexibleArrayChecked is valid (not moved-from).
+    [[nodiscard]] constexpr auto is_valid() const noexcept -> bool { return unchecked_storage.is_valid(); }
+
     /// Returns the address for the place of the `i`th element in the array.
     ///
     /// Requires 0 <= `i` < `capacity()`, and the object being in a valid, non-moved-from state.

@@ -1,0 +1,30 @@
+{
+	"name": "C++",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"features": {
+		"ghcr.io/devcontainers/features/common-utils:2": {
+			"installZsh": true,
+			"configureZshAsDefaultShell": true,
+			"installOhMyZsh": true,
+			"upgradePackages": true
+		}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools",
+				"ms-vscode.cmake-tools",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"vadimcn.vscode-lldb"
+			],
+			"settings": {
+				"cmake.configureOnOpen": true,
+				"clangd.path": "/usr/bin/clangd",
+				"C_Cpp.intelliSenseEngine": "disabled"
+			}
+		}
+	},
+	"postCreateCommand": "clang++ --version && clang-scan-deps --version"
+}

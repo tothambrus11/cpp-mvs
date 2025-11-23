@@ -4,10 +4,8 @@
 #include <concepts>
 #include <cstdio>
 #include <cstdlib>
-#include <exception>
-#include <iostream>
 #include <memory>
-#include <string>
+#include <print>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -51,7 +49,7 @@ constexpr void precondition(const bool p, const std::string_view message = "Prec
 {
     if (!p)
     {
-        std::fprintf(stderr, "Assertion failure: %s\n", std::string{message}.c_str());
+        std::println("Assertion failure: {}\n", message);
         std::quick_exit(EXIT_FAILURE);
     }
 }
@@ -107,7 +105,7 @@ private:
     /// Guaranteed to be a multiple of `Header`'s alignment.
     [[nodiscard]] static constexpr auto storage_size_for(const Int element_count) noexcept -> size_t
     {
-        return align_up(elements_offset() + sizeof(Element) * element_count, alignof(Header));
+        return align_up(static_cast<size_t>(elements_offset() + (sizeof(Element) * element_count)), alignof(Header));
     }
 
     /// Constructs a flexible array by taking ownership of an existing storage.
@@ -198,7 +196,9 @@ public:
     {
         // Moving to self is a no-op
         if (this == &other)
+        {
             return *this;
+        }
         // Destroying the header unless the object was in a moved-from state.
         if (storage != nullptr)
         {

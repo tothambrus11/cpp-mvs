@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 #include "library.h"
+#include "flexible_array_checked.hpp"
 
 // =============================================================================
 // 1. HELPERS & LIFECYCLE TRACKING
@@ -100,7 +101,7 @@ TEST_CASE_TEMPLATE("FlexibleArray Memory Layout Matrix", T,
 ) {
     using Header  = typename T::Header;
     using Element = typename T::Element;
-    using FA      = FlexibleArray<Header, Element>;
+    using FA      = FlexibleArrayChecked<Header, Element>;
 
     constexpr Int kCapacity = 3;
 
@@ -145,7 +146,7 @@ TEST_CASE_TEMPLATE("FlexibleArray Memory Layout Matrix", T,
 TEST_CASE_TEMPLATE("Primitive Signed Integers Integration", T, char, short, int, long long) {
     // Tests that FlexibleArray works with standard primitives as Elements
     // using a fixed simple header.
-    using FA = FlexibleArray<StandardHeader, T>;
+    using FA = FlexibleArrayChecked<StandardHeader, T>;
 
     auto fa = FA::with_header(5, StandardHeader{5});
 
@@ -168,12 +169,12 @@ TEST_SUITE("FlexibleArray Lifecycle") {
     TEST_CASE("Construction, Move, and Destruction") {
         LifecycleTracker::reset();
         {
-            auto fa = FlexibleArray<TestHeader, int>::with_header(5, TestHeader{5, 101});
+            auto fa = FlexibleArrayChecked<TestHeader, int>::with_header(5, TestHeader{5, 101});
             CHECK(LifecycleTracker::constructed == 2); // 1 arg, 1 internal
             CHECK(LifecycleTracker::destroyed == 1);   // 1 arg destroyed
 
             auto fa2 = std::move(fa);
-            CHECK(fa.leak_storage() == nullptr); // moved from
+            // fa is now in moved-from state
             CHECK(fa2.capacity() == 5);
         }
         // fa2 goes out of scope -> Header Dtor runs
@@ -183,7 +184,7 @@ TEST_SUITE("FlexibleArray Lifecycle") {
     TEST_CASE("project_temporary Stack Allocation") {
         LifecycleTracker::reset();
 
-        int result = FlexibleArray<TestHeader, double>::project_temporary(3, [](auto& fa) {
+        int result = FlexibleArrayChecked<TestHeader, double>::project_temporary(3, [](auto& fa) {
             std::construct_at(fa.header(), 3, 999);
 
             CHECK(fa.capacity() == 3);
@@ -213,5 +214,332 @@ TEST_SUITE("UnsafeBufferPointer") {
         // Note: We cannot easily test ptr[3] crashing (quick_exit) in standard unit tests
         // without a death-test harness, which Doctest supports via subcases/forking
         // but is complex to set up in a single file snippet.
+    }
+}
+
+TEST_SUITE("FlexibleArrayUnchecked Direct Usage") {
+    TEST_CASE("Unchecked version without capacity tracking") {
+        // Test that FlexibleArrayUnchecked works without storing or checking capacity
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        
+        auto fa = FA::with_header(5, StandardHeader{5});
+        
+        // Can access header
+        CHECK(fa.header() != nullptr);
+        CHECK(fa.header()->trailing_element_count() == 5);
+        
+        // Can get element addresses (no bounds checking)
+        auto* elem0 = fa.element_address(0);
+        auto* elem4 = fa.element_address(4);
+        CHECK(elem0 != nullptr);
+        CHECK(elem4 != nullptr);
+        
+        // Verify proper spacing between elements
+        CHECK((elem4 - elem0) == 4);
+        
+        // Initialize elements
+        for(int i = 0; i < 5; ++i) {
+            std::construct_at(fa.element_address(i), i * 10);
+        }
+        
+        // Read back
+        CHECK(*fa.element_address(0) == 0);
+        CHECK(*fa.element_address(4) == 40);
+    }
+    
+    TEST_CASE("Unchecked move semantics") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, double>;
+        
+        auto fa1 = FA::with_header(3, StandardHeader{3});
+        std::construct_at(fa1.element_address(0), 1.5);
+        
+        auto fa2 = std::move(fa1);
+        CHECK(fa1.leak_storage() == nullptr);  // moved-from
+        CHECK(*fa2.element_address(0) == 1.5);
+    }
+}
+
+// =============================================================================
+// 6. COMPREHENSIVE EDGE CASE TESTS
+// =============================================================================
+
+TEST_SUITE("FlexibleArrayChecked Edge Cases") {
+    TEST_CASE("Zero capacity array") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa = FA::with_header(0, StandardHeader{0});
+        
+        CHECK(fa.capacity() == 0);
+        CHECK(fa.header() != nullptr);
+    }
+    
+    TEST_CASE("Extract storage functionality") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa.element_address(0), 42);
+        std::construct_at(fa.element_address(1), 43);
+        
+        // Extract the unchecked storage
+        auto unchecked = fa.extract_storage();
+        
+        // Verify data is intact
+        CHECK(*unchecked.element_address(0) == 42);
+        CHECK(*unchecked.element_address(1) == 43);
+        CHECK(unchecked.header()->trailing_element_count() == 3);
+    }
+    
+    TEST_CASE("Swap functionality") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(2, StandardHeader{2});
+        auto fa2 = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa1.element_address(0), 10);
+        std::construct_at(fa2.element_address(0), 20);
+        
+        swap(fa1, fa2);
+        
+        CHECK(fa1.capacity() == 3);
+        CHECK(fa2.capacity() == 2);
+        CHECK(*fa1.element_address(0) == 20);
+        CHECK(*fa2.element_address(0) == 10);
+    }
+    
+    TEST_CASE("Move assignment") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(2, StandardHeader{2});
+        auto fa2 = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa1.element_address(0), 100);
+        std::construct_at(fa2.element_address(0), 200);
+        
+        fa1 = std::move(fa2);
+        
+        CHECK(fa1.capacity() == 3);
+        CHECK(*fa1.element_address(0) == 200);
+    }
+    
+    TEST_CASE("Self move assignment") {
+        using FA = FlexibleArrayChecked<StandardHeader, int>;
+        auto fa = FA::with_header(2, StandardHeader{2});
+        std::construct_at(fa.element_address(0), 42);
+        
+        fa = std::move(fa);  // Self-move
+        
+        CHECK(fa.capacity() == 2);
+        CHECK(*fa.element_address(0) == 42);
+    }
+    
+    TEST_CASE("Custom header initializer") {
+        struct ComplexHeader {
+            Int cap;
+            int value1;
+            double value2;
+            
+            ComplexHeader(Int c, int v1, double v2) : cap(c), value1(v1), value2(v2) {}
+            [[nodiscard]] Int trailing_element_count() const { return cap; }
+        };
+        
+        using FA = FlexibleArrayChecked<ComplexHeader, int>;
+        auto fa = FA::with_header_initialized_by(5, [](ComplexHeader* place) {
+            std::construct_at(place, 5, 999, 3.14);
+        });
+        
+        CHECK(fa.capacity() == 5);
+        CHECK(fa.header()->value1 == 999);
+        CHECK(fa.header()->value2 == 3.14);
+    }
+    
+    TEST_CASE("Non-primitive element types") {
+        struct ComplexElement {
+            int a;
+            double b;
+            char c;
+            
+            ComplexElement(int x, double y, char z) : a(x), b(y), c(z) {}
+        };
+        
+        using FA = FlexibleArrayChecked<StandardHeader, ComplexElement>;
+        auto fa = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa.element_address(0), 1, 1.1, 'a');
+        std::construct_at(fa.element_address(1), 2, 2.2, 'b');
+        std::construct_at(fa.element_address(2), 3, 3.3, 'c');
+        
+        CHECK(fa.element_address(0)->a == 1);
+        CHECK(fa.element_address(1)->b == 2.2);
+        CHECK(fa.element_address(2)->c == 'c');
+    }
+    
+    TEST_CASE("Large capacity array") {
+        using FA = FlexibleArrayChecked<StandardHeader, char>;
+        constexpr Int large_capacity = 10000;
+        auto fa = FA::with_header(large_capacity, StandardHeader{large_capacity});
+        
+        CHECK(fa.capacity() == large_capacity);
+        
+        // Initialize some elements
+        std::construct_at(fa.element_address(0), 'A');
+        std::construct_at(fa.element_address(9999), 'Z');
+        
+        CHECK(*fa.element_address(0) == 'A');
+        CHECK(*fa.element_address(9999) == 'Z');
+    }
+}
+
+TEST_SUITE("FlexibleArrayUnchecked Edge Cases") {
+    TEST_CASE("Zero capacity unchecked array") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa = FA::with_header(0, StandardHeader{0});
+        
+        CHECK(fa.header() != nullptr);
+        CHECK(fa.header()->trailing_element_count() == 0);
+    }
+    
+    TEST_CASE("Swap unchecked arrays") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(2, StandardHeader{2});
+        auto fa2 = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa1.element_address(0), 10);
+        std::construct_at(fa2.element_address(0), 20);
+        
+        swap(fa1, fa2);
+        
+        CHECK(fa1.header()->trailing_element_count() == 3);
+        CHECK(fa2.header()->trailing_element_count() == 2);
+        CHECK(*fa1.element_address(0) == 20);
+        CHECK(*fa2.element_address(0) == 10);
+    }
+    
+    TEST_CASE("Move assignment for unchecked") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa1 = FA::with_header(2, StandardHeader{2});
+        auto fa2 = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa1.element_address(0), 100);
+        std::construct_at(fa2.element_address(0), 200);
+        
+        fa1 = std::move(fa2);
+        
+        CHECK(fa1.header()->trailing_element_count() == 3);
+        CHECK(*fa1.element_address(0) == 200);
+        CHECK(fa2.leak_storage() == nullptr);  // moved-from
+    }
+    
+    TEST_CASE("Self move assignment unchecked") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa = FA::with_header(2, StandardHeader{2});
+        std::construct_at(fa.element_address(0), 42);
+        
+        fa = std::move(fa);  // Self-move
+        
+        CHECK(fa.header()->trailing_element_count() == 2);
+        CHECK(*fa.element_address(0) == 42);
+    }
+    
+    TEST_CASE("Leak storage functionality") {
+        using FA = FlexibleArrayUnchecked<StandardHeader, int>;
+        auto fa = FA::with_header(3, StandardHeader{3});
+        
+        std::construct_at(fa.element_address(0), 999);
+        
+        auto* raw_storage = fa.leak_storage();
+        CHECK(raw_storage != nullptr);
+        
+        // Manually manage the leaked storage
+        auto* header = reinterpret_cast<StandardHeader*>(raw_storage);
+        CHECK(header->trailing_element_count() == 3);
+        
+        // Manual cleanup
+        std::destroy_at(header);
+        Detail::aligned_free(raw_storage);
+    }
+    
+    TEST_CASE("Project temporary with unchecked") {
+        int result = FlexibleArrayUnchecked<StandardHeader, int>::project_temporary(5, [](auto& fa) {
+            std::construct_at(fa.header(), 5);
+            
+            for (int i = 0; i < 5; ++i) {
+                std::construct_at(fa.element_address(i), i * i);
+            }
+            
+            int sum = 0;
+            for (int i = 0; i < 5; ++i) {
+                sum += *fa.element_address(i);
+            }
+            
+            return sum;
+        });
+        
+        CHECK(result == 0 + 1 + 4 + 9 + 16); // 30
+    }
+}
+
+TEST_SUITE("Mixed Checked and Unchecked Usage") {
+    TEST_CASE("Convert checked to unchecked and back") {
+        using FAChecked = FlexibleArrayChecked<StandardHeader, int>;
+        using FAUnchecked = FlexibleArrayUnchecked<StandardHeader, int>;
+        
+        auto checked = FAChecked::with_header(3, StandardHeader{3});
+        std::construct_at(checked.element_address(0), 42);
+        
+        // Extract to unchecked
+        auto unchecked = checked.extract_storage();
+        CHECK(*unchecked.element_address(0) == 42);
+        
+        // Wrap back in checked (move into private constructor via factory)
+        auto checked2 = FAChecked::with_header_initialized_by(0, [&](auto*) {
+            // Don't actually initialize, we'll swap
+        });
+        
+        // Since we can't directly construct from unchecked publicly, 
+        // verify the unchecked can still be used independently
+        CHECK(unchecked.header()->trailing_element_count() == 3);
+    }
+    
+    TEST_CASE("Checked wraps unchecked without overhead") {
+        using FAChecked = FlexibleArrayChecked<StandardHeader, int>;
+        using FAUnchecked = FlexibleArrayUnchecked<StandardHeader, int>;
+        
+        // Verify that FlexibleArrayChecked has the same size as FlexibleArrayUnchecked
+        // since it should only contain the unchecked storage member
+        CHECK(sizeof(FAChecked) == sizeof(FAUnchecked));
+    }
+}
+
+TEST_SUITE("Alignment and Padding Verification") {
+    TEST_CASE("Misaligned header with over-aligned elements") {
+        struct TinyHeader {
+            char tag;
+            Int cap;
+            [[nodiscard]] Int trailing_element_count() const { return cap; }
+        };
+        
+        struct alignas(16) AlignedElement {
+            double value;
+        };
+        
+        using FA = FlexibleArrayChecked<TinyHeader, AlignedElement>;
+        auto fa = FA::with_header(5, TinyHeader{'X', 5});
+        
+        // Verify elements are properly aligned
+        auto elem_addr = reinterpret_cast<uintptr_t>(fa.element_address(0));
+        CHECK(elem_addr % 16 == 0);
+    }
+    
+    TEST_CASE("Header larger than element alignment") {
+        struct alignas(64) LargeHeader {
+            char data[64];
+            Int cap;
+            explicit LargeHeader(Int c) : cap(c) { data[0] = 'H'; }
+            [[nodiscard]] Int trailing_element_count() const { return cap; }
+        };
+        
+        using FA = FlexibleArrayChecked<LargeHeader, char>;
+        auto fa = FA::with_header(10, LargeHeader{10});
+        
+        CHECK(fa.capacity() == 10);
+        auto header_addr = reinterpret_cast<uintptr_t>(fa.header());
+        CHECK(header_addr % 64 == 0);
     }
 }

@@ -1,0 +1,55 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.compiler.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - name: GCC 14
+            cc: gcc-14
+            cxx: g++-14
+            install_script: |
+              sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+              sudo apt-get update
+              sudo apt-get install -y gcc-14 g++-14
+          - name: Clang 20
+            cc: clang-20
+            cxx: clang++-20
+            install_script: |
+              wget https://apt.llvm.org/llvm.sh
+              chmod +x llvm.sh
+              sudo ./llvm.sh 20 all
+              sudo apt-get install -y libc++-20-dev libc++abi-20-dev
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Build Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build cmake
+
+    - name: Install Compiler
+      run: ${{ matrix.compiler.install_script }}
+
+    - name: Configure CMake
+      env:
+        CC: ${{ matrix.compiler.cc }}
+        CXX: ${{ matrix.compiler.cxx }}
+      run: |
+        cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+    - name: Build
+      run: cmake --build build
+
+    - name: Test
+      run: ctest --test-dir build --output-on-failure
